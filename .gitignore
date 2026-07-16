@@ -1,0 +1,25 @@
+# Repos hermanos (cada uno vive en su propio repositorio de GitHub, ver README).
+paqta/
+paqta-agency-ms/
+paqta-auth-ms/
+paqta-billing-ms/
+paqta-files-ms/
+paqta-magic-links-ms/
+paqta-proposals-ms/
+paqta-integrador-ms/
+
+# Tooling / config local, no relevante para el informe académico.
+.claude/
+node_modules/
+*.log
+.DS_Store
+
+# Scripts operativos internos (deploy/destroy) — no se publican en el hub académico.
+deploy-all.sh
+destroy-all.sh
+destroy-dev.sh
+dev-all.sh
+commit-all.sh
+
+# Compose de referencia entregado por la cátedra, no aplica (paqta real es serverless, no Docker).
+docker-compose.yml
