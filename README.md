@@ -11,9 +11,9 @@
 | Integrante | Rol | GitHub |
 |---|---|---|
 | Olivier Paspuel | Backend / Arquitectura | [@vieerr](https://github.com/vieerr) |
-| <<Nombre 2>> | Transportes / gRPC | @usuario |
-| <<Nombre 3>> | Seguridad / Observabilidad | @usuario |
-| <<Nombre 4 (opcional)>> | Documentación / QA | @usuario |
+| Frederick Santiago Tipan Moreno | Transportes / gRPC | [@devdiagon](https://github.com/devdiagon) |
+| Carlos Orlando Hernandez Almeida | Seguridad / Observabilidad | [@gomiiDev](https://github.com/gomiiDev) |
+| Revilla Anchapaxi Antonio Adrian | Documentación / QA | [@RevillaA](https://github.com/RevillaA) |
 
 ## 🔗 Repositorios reales
 | Repo | Responsabilidad |
