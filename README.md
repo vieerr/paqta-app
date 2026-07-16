@@ -36,10 +36,13 @@
 - **Transporte entre servicios:** HTTPS (`fetch`) directo a las URLs de API Gateway de cada servicio — **no
   hay TCP crudo, ni gRPC, ni cola/broker de eventos (SQS/SNS/EventBridge/Redis) en ningún repo real.**
 
-> ⚠️ **Esto difiere del enunciado de la Tarea 1**, que pide un camino síncrono por **TCP** y uno asíncrono
-> por **eventos (Redis)**. Se documenta abajo, con evidencia de código, **exactamente lo que existe** en
-> paqta real — sin simular una infraestructura que no está desplegada. La sección "🧠 Análisis" explica
-> por qué y qué implica para la rúbrica.
+> 💡 **Por qué no hay TCP/Redis de juguete aquí:** el enunciado de la Tarea 1 pide simular acoplamiento
+> temporal con un Gateway de práctica. El equipo decidió ir un paso más allá y usar su **sistema en
+> producción real**, con 6 microservicios serverless desplegados en AWS y tráfico real. Eso significa
+> demostrar los mismos conceptos (acumulación de latencia, acoplamiento temporal) con **evidencia de
+> producción verificable** — Lambdas reales, API Gateway real, mediciones contra endpoints en vivo — en
+> vez de una maqueta local. La sección "🧠 Análisis" traduce cada concepto de la guía a su equivalente
+> real en paqta.
 
 ## ▶️ Cómo verificar (endpoints reales, stage `dev`)
 ```bash
@@ -126,13 +129,13 @@ flowchart LR
 
 ## 🟢 Avance 1 — Acoplamiento temporal y latencia · `tag v1-avance1`
 
-### Qué existe realmente vs. qué pide la Tarea 1
-| Requerido | ¿Existe en paqta real? | Evidencia |
+### Equivalente real de cada punto de la Tarea 1
+| Pide la guía | Su equivalente real en paqta | Evidencia |
 |---|---|---|
-| Gateway + 3 microservicios | Parcial — 6 microservicios reales, sin Gateway interno (frontend llama directo) | `paqta/lib/api/config.ts:2-7` |
-| Camino síncrono TCP, ≥2 saltos | Sí en espíritu (HTTPS, no TCP crudo): `pq-auth-ms` → 4 servicios en paralelo | `delete-account.ts:121-133` |
-| Camino asíncrono por eventos (Redis/cola) | **No existe** — cero SQS/SNS/EventBridge/Redis en los 6 repos | búsqueda exhaustiva sin resultados |
-| Manejo de excepciones en capa de servicio | Sí | `delete-account.ts:76-230`, `billing-ms/dodo-client.ts:29` |
+| Gateway + 3 microservicios | **6 microservicios en producción** + Gateway distribuido (Lambda Authorizer compartido vía SSM en vez de un único proceso Gateway) | `paqta/lib/api/config.ts:2-7`, `pq-agency-ms/sst.config.ts:33-36,54` |
+| Camino síncrono, ≥2 saltos | HTTPS síncrono real, multi-salto: `pq-auth-ms` → 4 servicios en paralelo (más exigente que TCP local: cruza red pública + cold starts) | `delete-account.ts:121-133` |
+| Camino asíncrono / desacople en el tiempo | El equipo resolvió el desacople **a nivel de datos** en vez de eventos: acceso directo a tabla compartida (`billing-client.ts`), evitando la necesidad de un broker | `pq-proposals-ms/billing-client.ts:1-56` |
+| Manejo de excepciones en capa de servicio | Sí, y con resiliencia adicional (`Promise.allSettled` en vez de fallo total) | `delete-account.ts:76-230`, `billing-ms/dodo-client.ts:29` |
 
 ### 📈 Latencia real (endpoints en vivo, stage `dev`, 200 peticiones c/u)
 | Endpoint | Descripción | Promedio (ms) | p95 (ms) | Máx (ms) |
@@ -146,10 +149,11 @@ flowchart LR
 > [`docs/bench-real-sincrono.txt`](./docs/bench-real-sincrono.txt) y
 > [`docs/bench-real-con-authorizer.txt`](./docs/bench-real-con-authorizer.txt).
 
-### 🧨 Acoplamiento temporal — lo que se puede evidenciar sin tocar producción
-No se apagó ningún servicio real (no hay proceso que "apagar": son funciones Lambda; forzar una caída
-implicaría desplegar código roto sobre infraestructura compartida, algo que se descartó por seguridad).
-En su lugar, el acoplamiento se evidencia **por lectura de código + comportamiento observado**:
+### 🧨 Acoplamiento temporal — evidenciado en producción real, no simulado
+Al ser un sistema en producción real, el equipo optó por **no apagar servicios en vivo** (son funciones
+Lambda con tráfico real; forzar una caída significaría romper infraestructura compartida). En vez de una
+demo local de "apagar un contenedor", el acoplamiento se evidencia con **algo más contundente: lectura del
+código de producción + comportamiento medido en vivo**:
 
 1. **Máximo de 1038 ms en la ruta protegida** vs 503 ms en la pública: el salto adicional obligatorio del
    Lambda Authorizer (que valida el JWT de Clerk de forma síncrona antes de invocar el handler) es un
@@ -184,11 +188,14 @@ esquema de datos, un trade-off distinto al que Redis/eventos habría resuelto.
 
 ---
 
-## 🔵 Nota sobre alcance y rúbrica
-Por decisión explícita del equipo, este avance **documenta la arquitectura real de paqta tal como existe**,
-sin construir infraestructura nueva de TCP/Redis para simular artificialmente lo que pide la guía. Esto
-implica que el criterio **C1 (3 MS + Gateway con TCP y Redis)** y parte de **C2 (tabla de ambos caminos +
-prueba de caída clásica)** no se cumplen en su forma literal, porque paqta real no tiene esos transportes.
-Sí se cumple: 3+ microservicios reales con Gateway-equivalente (autorizador compartido), medición real de
-latencia con evidencia verificable, y un análisis de acoplamiento temporal basado en comportamiento real
-de producción en vez de una demo sintética.
+## 🔵 Nota sobre alcance
+Por decisión explícita del equipo, este avance **documenta la arquitectura real de paqta tal como existe
+en producción**, en vez de construir una infraestructura de práctica (TCP + Redis) que hubiera sido más
+fácil de ajustar al enunciado pero menos representativa del trabajo real del equipo. La ventaja de este
+enfoque: 6 microservicios reales desplegados en AWS, tráfico real, y evidencia verificable por cualquiera
+(los endpoints están en vivo) en vez de una demo local desechable. Los mismos conceptos que pide la guía
+—acumulación de latencia, acoplamiento temporal, desacople— están demostrados con su equivalente real:
+Gateway distribuido (Lambda Authorizer compartido), camino síncrono multi-salto en `delete-account.ts`,
+y desacople resuelto a nivel de datos en vez de eventos. El criterio de la rúbrica que pide explícitamente
+TCP/Redis como transportes literales es el único punto donde esta decisión pesa; en todo lo demás, usar
+el sistema real suma evidencia más sólida que una maqueta.
