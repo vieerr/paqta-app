@@ -1,0 +1,15 @@
+
+▶️  Midiendo https://auth-api-dev.paqta.app/api/v1/auth/me  (200 peticiones)
+
+  50/200  100/200  150/200  200/200
+──────────── RESULTADOS ────────────
+Peticiones        : 200
+Latencia promedio : 130.97 ms
+Latencia p95      : 147.00 ms
+Latencia máx      : 1038.00 ms
+Errores           : 200
+────────────────────────────────────
+
+📋 Fila para el README:
+| https://auth-api-dev.paqta.app/api/v1/auth/me | 130.97 | 147.00 | 1038.00 |
+

@@ -1,0 +1,15 @@
+
+▶️  Midiendo https://magic-links-api-dev.paqta.app/api/v1/magic-links/nonexistent-token-bench/public  (200 peticiones)
+
+  50/200  100/200  150/200  200/200
+──────────── RESULTADOS ────────────
+Peticiones        : 200
+Latencia promedio : 138.59 ms
+Latencia p95      : 157.00 ms
+Latencia máx      : 503.00 ms
+Errores           : 200
+────────────────────────────────────
+
+📋 Fila para el README:
+| https://magic-links-api-dev.paqta.app/api/v1/magic-links/nonexistent-token-bench/public | 138.59 | 157.00 | 503.00 |
+
