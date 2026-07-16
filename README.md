@@ -76,7 +76,7 @@ flowchart LR
     end
 
     subgraph "Acoplamiento oculto (no es un camino de datos, es infraestructura compartida)"
-        SSM[(SSM: /paqta/{stage}/auth/authorizer-arn)]
+        SSM[("SSM Parameter Store: authorizer-arn")]
         AGENCY -.->|lee ARN al desplegar| SSM
         BILLING -.->|lee ARN al desplegar| SSM
         FILES -.->|lee ARN al desplegar| SSM
