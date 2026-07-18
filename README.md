@@ -84,6 +84,11 @@ flowchart LR
         MAGIC -.->|lee ARN al desplegar| SSM
         AUTH -.->|publica ARN| SSM
     end
+
+    subgraph "Avance 2 — segundo transporte: eventos asincronos sin broker externo"
+        DODO[Dodo Payments] -->|"webhook + firma HMAC, fire-and-forget"| BILLING
+        FILES -->|"Lambda Invoke Event, no espera respuesta"| EXTRACT[ExtractStyle Lambda]
+    end
 ```
 
 - Topología principal: **estrella** — el frontend llama a cada microservicio de forma independiente,
@@ -91,7 +96,9 @@ flowchart LR
 - El **único** camino síncrono con múltiples saltos reales del backend es el borrado de cuenta:
   `pq-auth-ms/handlers/delete-account.ts` llama por HTTPS a billing/proposals/files/magic-links
   **en paralelo**, esperando cada respuesta (`fetch` + `await`), pero tolerando fallos individuales.
-- No existe ningún camino asíncrono por eventos (SQS/SNS/EventBridge/Redis) en el sistema real.
+- No existe ningún broker de terceros (SQS/SNS/EventBridge/RabbitMQ/Redis) en el sistema real, pero sí
+  dos mecanismos asíncronos nativos reales (Avance 2): webhook de Dodo Payments y invocación Lambda
+  `Event` — ver detalle y evidencia de código en la sección "Avance 2" más abajo.
 
 ## 🗺️ Patrones y principios aplicados (evidencia real)
 - **Lambda Authorizer compartido (Sentinel/Guard distribuido):** `pq-auth-ms/sst.config.ts:41-46` publica
@@ -188,7 +195,7 @@ esquema de datos, un trade-off distinto al que Redis/eventos habría resuelto.
 
 ---
 
-## 🔵 Nota sobre alcance
+## 🔵 Nota sobre alcance — Avance 1
 Por decisión explícita del equipo, este avance **documenta la arquitectura real de paqta tal como existe
 en producción**, en vez de construir una infraestructura de práctica (TCP + Redis) que hubiera sido más
 fácil de ajustar al enunciado pero menos representativa del trabajo real del equipo. La ventaja de este
@@ -199,3 +206,93 @@ Gateway distribuido (Lambda Authorizer compartido), camino síncrono multi-salto
 y desacople resuelto a nivel de datos en vez de eventos. El criterio de la rúbrica que pide explícitamente
 TCP/Redis como transportes literales es el único punto donde esta decisión pesa; en todo lo demás, usar
 el sistema real suma evidencia más sólida que una maqueta.
+
+---
+
+## 🟡 Avance 2 — Comunicación: gRPC + 2.º transporte + excepciones · `tag v2-avance2`
+
+### Por qué paqta real no necesita gRPC (y qué hace en su lugar)
+gRPC resuelve un problema concreto: procesos de larga duración que necesitan un contrato binario
+eficiente y generación de código en ambos lados de una llamada RPC frecuente y de baja latencia. **Ese
+problema no existe en paqta real**: cada microservicio es un conjunto de funciones **AWS Lambda** sin
+estado, invocadas a través de **API Gateway**, con cold starts que ya dominan la latencia (ver Avance 1:
+máx. 1038 ms). Mantener un servidor gRPC persistente contradice el modelo serverless (Lambda no sostiene
+conexiones HTTP/2 de larga duración de forma nativa), y el overhead de mantener contratos `.proto` +
+codegen no se paga en un sistema donde el "contrato" ya lo impone API Gateway + JSON sobre HTTPS,
+verificable con `curl` desde cualquier lado sin herramientas adicionales. Es una decisión arquitectónica
+consciente, no una omisión: se prioriza la interoperabilidad simple (cualquier cliente HTTP) sobre la
+eficiencia de un RPC binario que el propio modelo Lambda no aprovecharía.
+
+Lo que sí es honesto reconocer como brecha real: el contrato **no está centralizado** como lo estaría un
+`.proto`. Cada lado (frontend y microservicio) declara su propio tipo TypeScript y ambos se mantienen
+sincronizados **por convención de nombres**, no por una fuente única generada — ej. el backend construye
+la respuesta en `pq-billing-ms/handlers/subscription.ts` y el frontend declara por su cuenta el tipo
+`BillingSubscriptionApi` en `paqta/lib/api/dtos.ts:103-116` con los mismos campos, duplicados a mano.
+
+### Segundo transporte: el sistema real ya es orientado a eventos — solo que con primitivas nativas de AWS, no con un broker de terceros
+La pregunta correcta no es "¿podemos meter RabbitMQ/MQTT/NATS?" sino "¿paqta ya resuelve algo asíncrono
+por eventos?" — y la respuesta es sí, con **dos mecanismos reales y funcionando en producción**, ninguno
+de los cuales es HTTPS síncrono petición-respuesta (ya cubierto en Avance 1):
+
+**a) Webhook de Dodo Payments — evento externo con reintentos automáticos del proveedor**
+`pq-billing-ms/handlers/webhook-dodo.ts:63` recibe eventos de pago (`payment.succeeded`,
+`subscription.cancelled`, etc.) que Dodo empuja de forma **fire-and-forget**: Dodo no espera una
+respuesta de negocio, solo un ack HTTP; si no lo recibe, **reintenta automáticamente** (comportamiento
+gestionado por la infraestructura del proveedor, no por código propio) — es el mismo contrato de
+entrega que ofrecería un broker PUB/SUB.
+- Verificación de firma HMAC-SHA256 (spec Standard Webhooks), sin depender de ninguna librería de
+  broker: `pq-billing-ms/webhook-signature.ts:9-40` (construcción del HMAC en línea 29, comparación
+  segura con `timingSafeEqual` en línea 37).
+- La ruta se declara **sin** el Lambda Authorizer compartido (`pq-billing-ms/sst.config.ts:207-208`),
+  a diferencia de todas las demás rutas del servicio (líneas 100-205 sí llevan `auth: { lambda: ... }`)
+  — la seguridad se delega a la firma del payload, exactamente como se validaría un mensaje de cola.
+- Idempotencia real por `eventId` contra reintentos duplicados: `webhook-dodo.ts:114-116`.
+- Manejo de excepciones: `try/catch` de nivel superior (líneas 64/181-184) devuelve `500 INTERNAL_ERROR`
+  sin tumbar la Lambda; validación de firma y de payload devuelven `401`/`400` controlados (líneas 68,
+  73) antes de tocar la base de datos.
+
+**b) Invocación Lambda asíncrona nativa — pub/sub real de AWS, sin broker externo**
+`pq-files-ms/handlers/complete.ts:106-112` invoca la función `ExtractStyle` con
+`InvocationType: "Event"`: el emisor **no espera** el resultado (recibe solo un ack de encolado,
+`StatusCode` 202) y AWS gestiona reintentos automáticos si la función destino falla — es la primitiva
+de mensajería asíncrona nativa de Lambda, el mismo modelo de entrega que SQS/SNS pero sin infraestructura
+adicional que operar. El permiso `lambda:InvokeFunction` se declara explícitamente en
+`pq-files-ms/sst.config.ts:117`. El error de invocación se captura sin tumbar el flujo principal
+(`complete.ts:114-116`: `catch` que solo loguea, la respuesta HTTP igual devuelve `200`).
+
+### 🔁 Comparación de transportes (evidencia real)
+| Transporte | Tipo | Patrón | Uso real en paqta |
+|---|---|---|---|
+| HTTPS (API Gateway) | Síncrono | Petición-respuesta | Frontend → cada microservicio; `delete-account.ts` multi-salto (Avance 1) |
+| Webhook Dodo (HTTPS + firma) | Asíncrono | Push externo con reintento del proveedor | Eventos de facturación (`webhook-dodo.ts`) |
+| Invocación Lambda `Event` | Asíncrono | Pub/sub nativo AWS (sin broker) | Disparo de extracción de estilo por IA (`complete.ts`) |
+| gRPC | — | — | No aplica al modelo serverless (ver justificación arriba) |
+
+Cuándo conviene cada uno, según lo observado: HTTPS síncrono cuando el llamador necesita el resultado para
+responder al usuario (ej. login, lectura de datos); webhook/evento cuando el origen es un sistema externo
+que no puede esperar una respuesta de negocio inmediata (pagos); invocación asíncrona nativa cuando una
+tarea es costosa y no bloqueante para el flujo principal (extracción de estilo por IA tras subir un PDF).
+gRPC agregaría valor solo si paqta tuviera procesos persistentes con llamadas internas muy frecuentes y
+sensibles a latencia — no es el caso de un sistema 100% Lambda.
+
+### 🧠 Análisis
+Los dos mecanismos anteriores cumplen el mismo rol que pediría un RabbitMQ/MQTT/NATS de práctica: desacoplan
+en el tiempo al emisor del receptor, con reintentos gestionados por la plataforma (Dodo o AWS) en vez de
+código propio de cola. La diferencia frente a un broker de mensajería explícito es que aquí no hay un
+tema/cola visible con múltiples suscriptores — es 1 emisor → 1 receptor por mecanismo — pero el contrato
+de entrega (fire-and-forget + reintento automático si falla) es el mismo concepto que evalúa la Tarea 2.
+Sobre gRPC: el equipo prefiere documentar honestamente que su modelo serverless no lo necesita, en vez de
+levantar un servicio gRPC aislado sin relación con el resto del sistema solo para cumplir el requisito —
+eso habría sido una simulación, no una demostración del trabajo real del equipo.
+
+---
+
+## 🔵 Nota sobre alcance — Avance 2
+El criterio C1 de la rúbrica (gRPC funcional entre dos servicios) no se cumple en su forma literal: no
+existe, ni tiene sentido arquitectónico forzarlo, en un sistema 100% Lambda serverless. El equipo asume
+ese costo en la nota antes que construir un servicio gRPC aislado sin propósito real solo para la rúbrica.
+El criterio C2 (segundo transporte asíncrono) sí se cumple con evidencia real y verificable — dos
+mecanismos productivos (webhook con reintento de proveedor + invocación Lambda asíncrona nativa) que
+cumplen el mismo contrato de entrega que un broker de mensajería, sin necesitar infraestructura adicional.
+C3 (manejo de excepciones) se refuerza con los `try/catch` de `webhook-dodo.ts` y `complete.ts`, además de
+los ya documentados en Avance 1.

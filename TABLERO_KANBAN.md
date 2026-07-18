@@ -26,14 +26,14 @@
 - [x] Diagrama de arquitectura real (Mermaid) + README Avance 1
 - [x] Tag `v1-avance1`
 
-### 🟡 Avance 2 — `avance-2`
-- [ ] Definir contrato `.proto` (gRPC) entre dos microservicios
-- [ ] Implementar comunicación gRPC en el monorepo
-- [ ] try/catch para controlar errores en gRPC
-- [ ] Agregar segundo transporte (RabbitMQ/MQTT/NATS) con PUB/SUB o queue
-- [ ] Demostrar error controlado sin caída del servicio
-- [ ] Tabla comparativa de transportes
-- [ ] Diagrama actualizado + README Avance 2
+### 🟡 Avance 2 — `avance-2` (equivalentes reales, sin infra nueva)
+- [ ] ~~Contrato `.proto` (gRPC)~~ — no aplica al modelo serverless, documentado como decisión arquitectónica
+- [x] Auditar los 6 repos en busca de webhooks/eventos/invocación asíncrona nativa
+- [x] Identificar segundo transporte real #1: webhook Dodo Payments (`webhook-dodo.ts`) con firma HMAC + idempotencia
+- [x] Identificar segundo transporte real #2: invocación Lambda asíncrona nativa (`complete.ts`, `InvocationType: Event`)
+- [x] Confirmar manejo de excepciones en ambos (`try/catch` sin tumbar el servicio)
+- [x] Tabla comparativa de transportes (HTTPS, webhook, Lambda Event, gRPC no aplica)
+- [x] Diagrama actualizado con los dos transportes nuevos + README Avance 2
 - [ ] Tag `v2-avance2`
 
 ### 🔵 Avance 3 — `avance-3`
@@ -51,8 +51,10 @@
 ## Tablero Markdown (alternativa dentro del repo)
 | Backlog | Por hacer | En progreso | En revisión | Hecho |
 |---|---|---|---|---|
-| Integrar Sentry (T3) | Contrato gRPC (T2) | — | — | Auditoría de los 6 repos reales |
-| JWT + Guard (T3) | Segundo transporte (T2) | — | — | README Avance 1 + diagrama Mermaid |
+| Integrar Sentry (T3) | Tag `v2-avance2` | — | — | Auditoría de los 6 repos reales |
+| JWT + Guard (T3) | | — | — | README Avance 1 + diagrama Mermaid |
 | | | | | Benchmark real (magic-links-api-dev, auth-api-dev) |
 | | | | | Análisis de acoplamiento (Lambda Authorizer compartido) |
 | | | | | Tag `v1-avance1` |
+| | | | | Segundo transporte real: webhook Dodo + Lambda Event (`complete.ts`) |
+| | | | | README Avance 2 + diagrama actualizado |

@@ -23,3 +23,4 @@ commit-all.sh
 
 # Compose de referencia entregado por la cátedra, no aplica (paqta real es serverless, no Docker).
 docker-compose.yml
+docker-compose.transportes.yml
